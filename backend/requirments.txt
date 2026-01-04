@@ -1,0 +1,27 @@
+# ==================== FastAPI and Server ====================
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19
+
+# ==================== Database ====================
+sqlalchemy==2.0.36
+
+# ==================== Authentication & Security ====================
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pyjwt==2.9.0
+python-dotenv==1.0.1
+bcrypt==4.2.1
+
+# ==================== Validation ====================
+pydantic==2.10.3
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# ==================== AI Integration ====================
+google-generativeai==0.8.3
+
+# ==================== NOTE ====================
+# PyTorch, Unsloth, transformers, peft, etc. are already installed
+# Do NOT reinstall them to avoid version conflicts
+# If you need to reinstall ML packages, use the separate installation script
