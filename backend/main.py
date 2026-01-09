@@ -1,10 +1,10 @@
 # CRITICAL: Import patches BEFORE anything else
-import patch_imports  # This must be first!
+import patch_imports  # Keeping this consistent with your setup
 
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
-import torch
+# Removed import torch as it is not needed for llama-cpp-python inference here
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,11 +25,12 @@ async def lifespan(app: FastAPI):
     print("✅ Database initialized")
 
     try:
-        print("🤖 Loading local fine-tuned Gemma 2 model...")
+        print("🤖 Loading local GGUF Gemma 2 model...")
+        # load_local_model now returns (model, None)
         model, tokenizer = load_local_model()
         app.state.model = model
-        app.state.tokenizer = tokenizer
-        print("✅ AI Model loaded and ready on GPU")
+        app.state.tokenizer = tokenizer # This will be None, which is fine
+        print("✅ AI Model loaded and ready")
     except Exception as e:
         print(f"❌ Error loading AI model: {e}")
         import traceback
@@ -41,16 +42,17 @@ async def lifespan(app: FastAPI):
     yield
 
     print("🛑 Shutting down server...")
+    # Llama object cleanup is handled automatically by Python's garbage collector,
+    # so manual torch cache clearing is not required here.
     if hasattr(app.state, 'model') and app.state.model is not None:
         del app.state.model
         del app.state.tokenizer
-        torch.cuda.empty_cache()
     print("👋 Shutdown complete")
 
 # ==================== App Configuration ====================
 app = FastAPI(
     title="Automata Visualizer API",
-    description="Backend API with Local Gemma 2 Integration",
+    description="Backend API with Local GGUF Integration",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -70,7 +72,7 @@ def read_root():
     return {
         "message": "Automata Visualizer API",
         "status": "running",
-        "ai_status": "Gemma-2-2B-Local-Active"
+        "ai_status": "Gemma-2-2B-GGUF-Active"
     }
 
 @app.get("/health")

@@ -7,16 +7,14 @@ import patch_imports
 import json
 import re
 import os
-import torch
 
-# CRITICAL: Import unsloth BEFORE transformers/peft  
-from unsloth import FastLanguageModel
-from peft import PeftModel
+# --- CHANGED: Replaced Unsloth/Peft with llama_cpp ---
+from llama_cpp import Llama
 import google.generativeai as genai
 from typing import Dict, Any, Tuple
 
 # Configuration
-GEMINI_API_KEY = "AIzaSyCBa1NSK5h3y2JgCFBT8kkflqNEBT1GeOk"#   AIzaSyCcvq2X51D3855uZGFEdH9CzRV8yTUKYYs
+GEMINI_API_KEY = "AIzaSyAR0a-RI2Edk3gOB9jtKWwjO4iRnMuuxuk"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ==================== 1. HELPERS & CLEANUP ====================
@@ -154,13 +152,6 @@ TASK:
 
 REFINED PROMPT:
 """
-    
-    # DEBUG: Print the full prompt being sent to Gemini
-    print(f"🚪 Full prompt being sent to Gemini:")
-    print(f"{'='*60}")
-    print(refiner_prompt)
-    print(f"{'='*60}")
-    
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         res = model.generate_content(refiner_prompt)
@@ -181,34 +172,35 @@ REFINED PROMPT:
 # ==================== 3. MODEL LOADERS & INFERENCE ====================
 
 def load_local_model():
-    base_model_path = r"D:/base_gemma2_2b"
-    adapter_path = r"D:/T5_gemma2_model"
+    # --- CHANGED: Update this path to your actual GGUF file location ---
+    # Example: D:/gemma-2-2b-it-Q4_K_M.gguf
+    model_path = r"D:/FYP_App/gemma-2-2b-it.Q4_K_M.gguf"
 
     try:
-        # Load with Unsloth optimizations
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=base_model_path,
-            max_seq_length=512,
-            load_in_4bit=True,
-            local_files_only=True,
-            device_map="cuda:0"
+        print(f"📂 Loading GGUF model from: {model_path}")
+        
+        # Load GGUF model using llama-cpp-python
+        # n_gpu_layers=-1 attempts to offload all layers to GPU (if CUDA is set up)
+        model = Llama(
+            model_path=model_path,
+            n_gpu_layers=-1, 
+            n_ctx=2048,
+            verbose=False
         )
 
-        # Attach adapter
-        model = PeftModel.from_pretrained(model, adapter_path)
+        print("✅ System Ready: GGUF Model loaded successfully.")
         
-        # Prepare for inference
-        FastLanguageModel.for_inference(model)
-        
-        print("✅ System Ready: Base Model + Local Adapter fully merged.")
-        return model, tokenizer
+        # We return None for the tokenizer because llama-cpp-python handles it internally
+        return model, None
         
     except Exception as e:
         print(f"❌ Model loading failed: {e}")
         raise
 
 def call_local_model_logic(model, tokenizer, refined_prompt: str) -> str:
-    """Stage 2: Local Logic Generation (Gemma 2)."""
+    """Stage 2: Local Logic Generation (Gemma 2 via GGUF)."""
+    
+    # We maintain the prompt format used during training/fine-tuning
     prompt = (
         f"### Instruction:\nConvert the FSM description into a DFA structure.\n\n"
         f"### Input:\nfsm description: \"{refined_prompt}\"\n\n"
@@ -216,33 +208,18 @@ def call_local_model_logic(model, tokenizer, refined_prompt: str) -> str:
     )
     
     try:
-        # Tokenize input
-        inputs = tokenizer(
+        # --- CHANGED: Use llama-cpp generate call ---
+        output = model(
             prompt, 
-            return_tensors="pt",
-            truncation=True,
-            max_length=512
-        ).to("cuda")
+            max_tokens=256,
+            temperature=0.1,
+            top_p=0.9,
+            stop=["### Response:", "### Input:", "\n\n"], # Stop tokens to prevent hallucinations
+            echo=False
+        )
         
-        # Generate with safe parameters
-        with torch.inference_mode():
-            outputs = model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs.get("attention_mask"),
-                max_new_tokens=256,  # Reduced from 512
-                temperature=0.1,
-                do_sample=True,
-                top_p=0.9,
-                pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                use_cache=True
-            )
-        
-        # Decode output
-        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Extract response
-        raw_response = decoded.split("### Response:")[-1].strip()
+        # Extract the text from the response object
+        raw_response = output['choices'][0]['text'].strip()
         cleaned_response = clean_t5_output(raw_response)
         
         print(f"🧠 Local Model Output: {cleaned_response[:200]}...")
@@ -263,8 +240,6 @@ def generate_automata_from_text(request, user_input: str) -> Dict[str, Any]:
     print(f"\n{'='*60}")
     print(f"📥 MAIN FUNCTION: generate_automata_from_text called")
     print(f"📥 user_input parameter: '{user_input}'")
-    print(f"📥 user_input type: {type(user_input)}")
-    print(f"📥 user_input length: {len(user_input)}")
     print(f"{'='*60}\n")
     
     try:
@@ -273,7 +248,6 @@ def generate_automata_from_text(request, user_input: str) -> Dict[str, Any]:
         if not is_valid:
             raise ValueError(content)
         
-        print(content)
         # Clean the refined prompt
         refined = content.replace("REFINED PROMPT:", "").strip()
         print(f"✅ Refined Prompt: {refined}")
@@ -284,9 +258,10 @@ def generate_automata_from_text(request, user_input: str) -> Dict[str, Any]:
             return _get_sample_automata()
         
         # Step C: Local Gemma 2 Logic Generation
+        # Note: We pass None for tokenizer as it is not used in the GGUF function anymore
         logic_text = call_local_model_logic(
             request.app.state.model,
-            request.app.state.tokenizer,
+            None, 
             refined
         )
         
